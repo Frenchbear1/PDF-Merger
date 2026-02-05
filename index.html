@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PDF Merger — Drag & Drop</title>
+  <link rel="icon" href="data:," />
+  <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+  <style>
+    :root{ --bg:#0b0b0c; --card:#161618; --text:#f2f2f7; --muted:#a1a1a6; --border:#2c2c2e; --accent:#0a84ff; --danger:#ff453a; }
+    @media (prefers-color-scheme: light){ :root{ --bg:#f2f2f7; --card:#fff; --text:#111; --muted:#555; --border:#e5e5ea; } }
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,sans-serif}
+    header{position:sticky;top:0;backdrop-filter:saturate(1.2) blur(10px);background:color-mix(in srgb, var(--bg) 70%, transparent);border-bottom:1px solid var(--border)}
+    .wrap{max-width:980px;margin:0 auto;padding:20px}
+    h1{font-size:20px;margin:0 0 6px}
+    .sub{color:var(--muted);font-size:13px;margin-bottom:14px}
+
+    .panel{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;}
+    .grid{display:grid;grid-template-columns:1fr;gap:16px}
+    @media(min-width:880px){ .grid{grid-template-columns: 1.2fr .8fr;} }
+
+    .drop{border:2px dashed var(--border);border-radius:16px;padding:18px;text-align:center;transition:border-color .2s, background .2s}
+    .drop.drag{border-color:var(--accent);background:color-mix(in srgb, var(--card) 80%, transparent)}
+    .drop input{display:none}
+
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .row .grow{flex:1}
+    select, input[type="text"], button{appearance:none;background:var(--card);border:1px solid var(--border);color:var(--text);padding:10px 12px;border-radius:10px;font-weight:600}
+    select:focus, input[type="text"]:focus, button:focus{outline:2px solid color-mix(in srgb,var(--accent) 50%, transparent)}
+    button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+    button.danger{background:var(--danger);border-color:var(--danger);color:#fff}
+
+    .list{max-height:420px;overflow:auto;border:1px solid var(--border);border-radius:12px}
+    .item{display:grid;grid-template-columns: 1.5fr .7fr .6fr 80px;gap:8px;align-items:center;padding:10px 12px;border-bottom:1px solid var(--border);}
+    .item:last-child{border-bottom:none}
+    .type{font-variant:all-small-caps;color:var(--muted)}
+    .ghost{opacity:.4}
+    .handle{cursor:grab;user-select:none}
+    .empty{padding:18px;color:var(--muted);text-align:center}
+    .pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid var(--border);border-radius:999px}
+    .hint{color:var(--muted);font-size:12px}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>PDF Merger</h1>
+      <div class="sub">Drop in PDFs and images. Sort by filename (numeric‑aware), A–Z, or date modified. Manual drag supported.</div>
+    </div>
+  </header>
+
+  <main class="wrap grid">
+    <!-- Left: files and controls -->
+    <section class="panel">
+      <div id="drop" class="drop">
+        <p><strong>Drag & Drop</strong> files here (PDF, PNG, JPG, JPEG, GIF, BMP, TIFF, WEBP) <br/><span class="hint">or</span></p>
+        <p><label class="pill" style="cursor:pointer"><span>Choose files…</span><input id="fileInput" type="file" multiple accept="application/pdf,image/*" /></label></p>
+      </div>
+
+      <div style="height:12px"></div>
+
+      <div class="row">
+        <label class="pill">Sort by
+          <select id="sortMode">
+            <option value="manual">Current (dragged) — keep my order</option>
+            <option value="num-asc">Name (natural) A→Z — e.g., doc1, doc2, doc10</option>
+            <option value="num-desc">Name (natural) Z→A — e.g., doc10, doc2, doc1</option>
+            <option value="alpha-asc">Name (literal) A→Z — e.g., apple, banana, cat</option>
+            <option value="alpha-desc">Name (literal) Z→A — e.g., zebra, orange, ant</option>
+            <option value="date-asc">Date modified ↑ — e.g., Jan 1 → Feb 1 → Mar 1</option>
+            <option value="date-desc">Date modified ↓ — e.g., Mar 1 → Feb 1 → Jan 1</option>
+            <option value="size-asc">Size ↑ — e.g., 200 KB → 2 MB → 20 MB</option>
+            <option value="size-desc">Size ↓ — e.g., 20 MB → 2 MB → 200 KB</option>
+            <option value="ext-asc">Type A→Z — e.g., doc, pdf, png</option>
+            <option value="ext-desc">Type Z→A — e.g., png, pdf, doc</option>
+          </select>
+        </label>
+        <button id="applySort">Apply</button>
+        <button id="clear" class="danger">Clear</button>
+        <span class="grow"></span>
+      </div>
+
+      <div style="height:10px"></div>
+
+      <div class="list" id="list"></div>
+
+      <div style="height:12px"></div>
+
+      <div class="row">
+        <input id="outName" class="grow" type="text" placeholder="Output filename (no .pdf)" value="merged"/>
+        <button id="merge" class="primary">Merge → PDF</button>
+      </div>
+      <div class="hint" id="status" style="margin-top:8px"></div>
+    </section>
+
+    <!-- Right: notes -->
+    <aside class="panel">
+      <h3 style="margin-top:0">How it works</h3>
+      <ol>
+        <li>Add files by dropping or choosing.</li>
+        <li>Pick a sort option (matches your Python script’s logic).</li>
+        <li>Optionally drag rows to fine‑tune order.</li>
+        <li>Click <em>Merge → PDF</em> to download a single PDF.</li>
+      </ol>
+      <p class="hint">Everything runs locally in your browser using <code>pdf-lib</code>. No uploads.</p>
+    </aside>
+  </main>
+
+<script>
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const drop = document.getElementById('drop');
+  const fileInput = document.getElementById('fileInput');
+  const listEl = document.getElementById('list');
+  const sortModeEl = document.getElementById('sortMode');
+  const statusEl = document.getElementById('status');
+
+  /** In‑memory file table */
+  let table = []; // { id, file:File, name, ext, type:'pdf'|'image', lastModified }
+
+  const byId = id => table.find(x => x.id === id);
+  const extOf = name => (name.split('.').pop() || '').toLowerCase();
+  const isImgExt = e => ['png','jpg','jpeg','gif','bmp','tif','tiff','webp'].includes(e);
+
+  function alnumKey(s){
+    // numeric‑aware key, similar to your Python regex split
+    // returns array of tokens: strings lowercased and numbers as integers
+    const parts = [];
+    s.replace(/(\d+)|(\D+)/g, (_, num, txt) => {
+      if (num) parts.push(parseInt(num,10));
+      else if (txt) parts.push(txt.toLowerCase());
+    });
+    return parts;
+  }
+
+  function sortTable(mode){
+    if (mode === 'manual') return; // keep current drag order
+
+    const cmpAlpha = (a,b) => a.name.localeCompare(b.name);
+    const cmpAlnum = (a,b) => {
+      const A = alnumKey(a.name), B = alnumKey(b.name);
+      const n = Math.max(A.length, B.length);
+      for (let i=0;i<n;i++){
+        const x = A[i], y = B[i];
+        if (x === undefined) return -1;
+        if (y === undefined) return 1;
+        if (typeof x === 'number' && typeof y === 'number'){
+          if (x !== y) return x - y;
+        } else {
+          const sx = String(x), sy = String(y);
+          const r = sx.localeCompare(sy);
+          if (r !== 0) return r;
+        }
+      }
+      return 0;
+    };
+    const cmpDate = (a,b) => a.lastModified - b.lastModified;
+    const cmpSize = (a,b) => (a.file?.size ?? 0) - (b.file?.size ?? 0);
+    const cmpExt = (a,b) => a.ext.localeCompare(b.ext);
+
+    let cmp = cmpAlnum;
+    let rev = false;
+    switch(mode){
+      case 'num-asc': cmp = cmpAlnum; rev = false; break;
+      case 'num-desc': cmp = cmpAlnum; rev = true; break;
+      case 'alpha-asc': cmp = cmpAlpha; rev = false; break;
+      case 'alpha-desc': cmp = cmpAlpha; rev = true; break;
+      case 'date-asc': cmp = cmpDate; rev = false; break;
+      case 'date-desc': cmp = cmpDate; rev = true; break;
+      case 'size-asc': cmp = cmpSize; rev = false; break;
+      case 'size-desc': cmp = cmpSize; rev = true; break;
+      case 'ext-asc': cmp = cmpExt; rev = false; break;
+      case 'ext-desc': cmp = cmpExt; rev = true; break;
+    }
+    table.sort((a,b)=> rev ? cmp(b,a) : cmp(a,b));
+  }
+
+    function render(){
+    if (!table.length){
+      listEl.innerHTML = '<div class="empty">No files yet. Add PDFs or images.</div>';
+      return;
+    }
+    const rows = table.map(r => `
+      <div class="item" data-id="${r.id}">
+        <div class="name"><span class="handle">☰</span> ${r.name}</div>
+        <div class="type">${r.type}</div>
+        <div class="type">${new Date(r.lastModified).toLocaleString()}</div>
+        <div style="text-align:right"><button data-act="remove">Remove</button></div>
+      </div>`).join('');
+    listEl.innerHTML = rows;
+  }
+
+  function addFiles(files){
+    const arr = Array.from(files || []);
+    for (const f of arr){
+      const ext = extOf(f.name);
+      const type = ext === 'pdf' ? 'pdf' : (isImgExt(ext) ? 'image' : 'other');
+      if (type === 'other') continue; // ignore unsupported types
+      table.push({
+        id: crypto.randomUUID(),
+        file: f,
+        name: f.name,
+        ext,
+        type,
+        lastModified: f.lastModified || Date.now()
+      });
+    }
+    sortTable(sortModeEl.value);
+    render();
+  }
+
+  // Drag & drop
+  ['dragenter','dragover'].forEach(ev =>
+    drop.addEventListener(ev,e=>{e.preventDefault(); drop.classList.add('drag');})
+  );
+  ['dragleave','drop'].forEach(ev =>
+    drop.addEventListener(ev,e=>{e.preventDefault(); drop.classList.remove('drag');})
+  );
+  drop.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+  fileInput.addEventListener('change', e => addFiles(e.target.files));
+
+  document.getElementById('applySort').addEventListener('click', ()=>{
+    const mode = sortModeEl.value;
+    if (mode === 'manual'){ render(); return; }
+    sortTable(mode);
+    render();
+  });
+
+  document.getElementById('clear').addEventListener('click', ()=>{
+    table = [];
+    render();
+  });
+
+  // Remove + manual drag reordering (very light weight)
+  listEl.addEventListener('click', (e)=>{
+    const btn = e.target.closest('button[data-act="remove"]');
+    if (!btn) return;
+    const id = e.target.closest('.item')?.dataset.id;
+    table = table.filter(x => x.id !== id);
+    render();
+  });
+
+  // Simple drag within list
+  let dragId = null;
+  listEl.addEventListener('pointerdown', (e)=>{
+    const row = e.target.closest('.item');
+    if (!row) return;
+    if (!e.target.closest('.handle')) return; // drag via handle only
+    dragId = row.dataset.id; row.classList.add('ghost');
+    row.setPointerCapture(e.pointerId);
+  });
+  listEl.addEventListener('pointerup', (e)=>{
+    const ghost = listEl.querySelector('.ghost'); if (ghost) ghost.classList.remove('ghost');
+    dragId = null;
+  });
+  listEl.addEventListener('pointermove', (e)=>{
+    if (!dragId) return;
+    const over = document.elementFromPoint(e.clientX, e.clientY)?.closest('.item');
+    const srcIdx = table.findIndex(x=>x.id===dragId);
+    if (!over || over.dataset.id === dragId) return;
+    const dstIdx = table.findIndex(x=>x.id===over.dataset.id);
+    // swap indices
+    const [m] = table.splice(srcIdx,1);
+    table.splice(dstIdx,0,m);
+    render();
+  });
+
+  async function readAsDataURL(file){
+    return await new Promise((res,rej)=>{ const r = new FileReader(); r.onerror=rej; r.onload=()=>res(r.result); r.readAsDataURL(file); });
+  }
+  async function readAsArrayBuffer(file){
+    return await new Promise((res,rej)=>{ const r = new FileReader(); r.onerror=rej; r.onload=()=>res(r.result); r.readAsArrayBuffer(file); });
+  }
+
+  async function merge(){
+    if (!table.length){ status('Add some files first.'); return; }
+    const outName = (document.getElementById('outName').value || 'merged').replace(/\.pdf$/i,'') + '.pdf';
+    status('Merging… this happens locally.');
+
+    const out = await PDFDocument.create();
+
+    for (const row of table){
+      if (row.type === 'pdf'){
+        try{
+          const bytes = await readAsArrayBuffer(row.file);
+          const src = await PDFDocument.load(bytes);
+          const pages = await out.copyPages(src, src.getPageIndices());
+          for (const p of pages) out.addPage(p);
+        }catch(err){ console.error('PDF error', row.name, err); }
+      } else if (row.type === 'image'){
+        try{
+          const bytes = await readAsArrayBuffer(row.file);
+          let img, w, h;
+          if (row.ext === 'jpg' || row.ext === 'jpeg'){
+            img = await out.embedJpg(bytes); w = img.width; h = img.height;
+          } else {
+            img = await out.embedPng(bytes); w = img.width; h = img.height;
+          }
+          // Fit to a page preserving aspect ratio (use the image size as page size up to a cap)
+          const maxW = 1200, maxH = 1600; // cap to keep file size sane
+          const scale = Math.min(maxW/w, maxH/h, 1);
+          const pw = Math.round(w*scale), ph = Math.round(h*scale);
+          const page = out.addPage([pw, ph]);
+          page.drawImage(img, { x:0, y:0, width:pw, height:ph });
+        }catch(err){ console.error('IMG error', row.name, err); }
+      }
+    }
+
+    const bytes = await out.save({ addDefaultPage: false });
+    const blob = new Blob([bytes], { type: 'application/pdf' });
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: outName });
+    a.click();
+    URL.revokeObjectURL(a.href);
+    status('Done. Downloaded ' + outName);
+  }
+
+  function status(msg){ statusEl.textContent = msg; }
+
+  document.getElementById('merge').addEventListener('click', merge);
+
+  // initial empty render
+  render();
+</script>
+</body>
+</html>
